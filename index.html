@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#6366f1">
+  <title>Recall — Spaced Repetition Calendar</title>
+  <meta name="description" content="Log what you learned and automatically schedule spaced-repetition reviews. Sync to Google Calendar and see your Blackbaud assignments.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-2: #161922;
+      --bg-3: #1d2130;
+      --line: #262b3a;
+      --txt: #e7e9ee;
+      --txt-dim: #9aa2b4;
+      --txt-faint: #6b7385;
+      --brand: #6366f1;
+      --brand-2: #8b5cf6;
+      --danger: #ef4444;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --radius: 14px;
+      --shadow: 0 10px 30px rgba(0,0,0,.45);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--txt);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased; line-height: 1.45;
+      padding-bottom: calc(72px + var(--safe-b));
+    }
+    button { font-family: inherit; cursor: pointer; }
+    a { color: var(--brand-2); }
+
+    /* ---------- top bar ---------- */
+    header.app {
+      position: sticky; top: 0; z-index: 30;
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px calc(14px) 16px;
+      padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      background: linear-gradient(180deg, rgba(15,17,23,.96), rgba(15,17,23,.82));
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+    }
+    header.app img { width: 30px; height: 30px; border-radius: 8px; }
+    header.app h1 { font-size: 19px; margin: 0; font-weight: 700; letter-spacing: .2px; }
+    header.app .spacer { flex: 1; }
+    .icon-btn {
+      background: var(--bg-3); color: var(--txt); border: 1px solid var(--line);
+      border-radius: 10px; padding: 8px 10px; font-size: 14px; display: inline-flex;
+      align-items: center; gap: 6px;
+    }
+    .icon-btn:hover { background: #232838; }
+    #installBtn { display: none; }
+
+    /* ---------- layout ---------- */
+    main { max-width: 820px; margin: 0 auto; padding: 14px 14px 0; }
+    .view { display: none; }
+    .view.active { display: block; animation: fade .18s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .8px;
+      color: var(--txt-faint); margin: 18px 4px 8px; font-weight: 700; }
+
+    /* ---------- buttons ---------- */
+    .btn {
+      border: none; border-radius: 11px; padding: 11px 16px; font-size: 15px; font-weight: 600;
+      color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      box-shadow: 0 6px 16px rgba(99,102,241,.35);
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.secondary { background: var(--bg-3); color: var(--txt); border: 1px solid var(--line); box-shadow: none; }
+    .btn.ghost { background: transparent; color: var(--brand-2); box-shadow: none; padding: 8px 10px; }
+    .btn.danger { background: var(--bg-3); color: var(--danger); border: 1px solid var(--line); box-shadow: none; }
+    .btn.sm { padding: 7px 11px; font-size: 13px; border-radius: 9px; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* ---------- cards ---------- */
+    .card { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 14px; margin-bottom: 12px; }
+    .muted { color: var(--txt-dim); }
+    .faint { color: var(--txt-faint); font-size: 13px; }
+
+    /* ---------- calendar ---------- */
+    .cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .cal-head h2 { font-size: 18px; margin: 0; }
+    .cal-head .spacer { flex: 1; }
+    .nav-btn { background: var(--bg-3); border: 1px solid var(--line); color: var(--txt);
+      width: 36px; height: 36px; border-radius: 10px; font-size: 18px; line-height: 1; }
+    .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 6px; }
+    .weekdays div { text-align: center; font-size: 11px; color: var(--txt-faint);
+      text-transform: uppercase; letter-spacing: .5px; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .cell {
+      background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+      min-height: 64px; padding: 5px 5px 4px; position: relative; overflow: hidden;
+      display: flex; flex-direction: column; gap: 3px; text-align: left;
+    }
+    .cell.out { opacity: .38; }
+    .cell.today { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+    .cell .dnum { font-size: 12px; font-weight: 600; color: var(--txt-dim); }
+    .cell.today .dnum { color: #fff; background: var(--brand); border-radius: 6px;
+      width: 20px; height: 20px; display: grid; place-items: center; }
+    .chip { font-size: 10px; line-height: 1.25; border-radius: 5px; padding: 1px 4px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; }
+    .chip.assignment { background: #334155; border-left: 3px solid #f59e0b; }
+    .chip.done { opacity: .5; text-decoration: line-through; }
+    .more { font-size: 10px; color: var(--txt-faint); }
+    @media (max-width: 540px) {
+      .cell { min-height: 56px; }
+      .chip { font-size: 9px; }
+    }
+
+    /* ---------- agenda / list rows ---------- */
+    .row { display: flex; align-items: flex-start; gap: 11px; padding: 11px 12px;
+      background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; }
+    .row .dot { width: 11px; height: 11px; border-radius: 50%; margin-top: 5px; flex: 0 0 auto; }
+    .row .body { flex: 1; min-width: 0; }
+    .row .ttl { font-weight: 600; }
+    .row .sub { font-size: 12.5px; color: var(--txt-dim); margin-top: 2px; }
+    .row .check { background: var(--bg-3); border: 1px solid var(--line); color: var(--ok);
+      border-radius: 9px; width: 34px; height: 34px; font-size: 16px; flex: 0 0 auto; }
+    .row.done .ttl { text-decoration: line-through; color: var(--txt-faint); }
+    .pill { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+      color: #fff; vertical-align: middle; }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg-3);
+      border: 1px solid var(--line); color: var(--txt-dim); }
+    .badge.overdue { color: var(--danger); border-color: rgba(239,68,68,.4); }
+    .badge.today { color: var(--brand-2); border-color: rgba(139,92,246,.4); }
+    .review-n { font-size: 11px; color: var(--txt-faint); }
+    .empty { text-align: center; color: var(--txt-faint); padding: 36px 16px; }
+    .empty .big { font-size: 34px; margin-bottom: 8px; }
+
+    .progress { height: 6px; background: var(--bg-3); border-radius: 999px; overflow: hidden; margin-top: 8px; }
+    .progress > i { display: block; height: 100%; background: linear-gradient(90deg, var(--brand), var(--brand-2)); }
+
+    /* ---------- forms ---------- */
+    label.fld { display: block; font-size: 13px; color: var(--txt-dim); margin: 12px 0 5px; font-weight: 600; }
+    input, select, textarea {
+      width: 100%; background: var(--bg-3); border: 1px solid var(--line); color: var(--txt);
+      border-radius: 10px; padding: 11px 12px; font-size: 15px; font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); }
+    textarea { resize: vertical; min-height: 64px; }
+    input[type="color"] { padding: 4px; height: 44px; }
+
+    /* ---------- modal ---------- */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50;
+      display: none; align-items: flex-end; justify-content: center; }
+    .overlay.open { display: flex; }
+    .sheet { background: var(--bg-2); border: 1px solid var(--line); border-bottom: none;
+      border-radius: 18px 18px 0 0; width: 100%; max-width: 560px; max-height: 92vh; overflow: auto;
+      padding: 18px 18px calc(22px + var(--safe-b)); box-shadow: var(--shadow);
+      animation: slideup .22s ease; }
+    @keyframes slideup { from { transform: translateY(30px); opacity: .6; } to { transform: none; opacity: 1; } }
+    @media (min-width: 600px) { .overlay { align-items: center; } .sheet { border-radius: 18px; border-bottom: 1px solid var(--line); } }
+    .sheet h3 { margin: 2px 0 4px; font-size: 19px; }
+    .sheet .close { position: absolute; }
+    .sheet-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+    .sheet-head .spacer { flex: 1; }
+
+    .preview-dates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .preview-dates span { font-size: 12px; background: var(--bg-3); border: 1px solid var(--line);
+      border-radius: 8px; padding: 4px 8px; color: var(--txt-dim); }
+    .preview-dates span b { color: var(--txt); }
+
+    /* ---------- bottom nav ---------- */
+    nav.tabs {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      background: rgba(22,25,34,.97); backdrop-filter: blur(10px);
+      border-top: 1px solid var(--line);
+      padding-bottom: var(--safe-b);
+    }
+    nav.tabs button { background: none; border: none; color: var(--txt-faint);
+      padding: 9px 4px 10px; font-size: 10.5px; display: flex; flex-direction: column;
+      align-items: center; gap: 3px; font-weight: 600; }
+    nav.tabs button .ic { font-size: 19px; line-height: 1; }
+    nav.tabs button.active { color: var(--brand-2); }
+
+    /* FAB */
+    .fab { position: fixed; right: 18px; bottom: calc(80px + var(--safe-b)); z-index: 41;
+      width: 56px; height: 56px; border-radius: 50%; border: none; color: #fff; font-size: 28px;
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      box-shadow: 0 10px 24px rgba(99,102,241,.5); }
+
+    .toast { position: fixed; left: 50%; bottom: calc(96px + var(--safe-b)); transform: translateX(-50%);
+      background: #0b0d13; border: 1px solid var(--line); color: var(--txt); padding: 10px 16px;
+      border-radius: 999px; font-size: 14px; z-index: 60; box-shadow: var(--shadow);
+      opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+
+    .hint { font-size: 12.5px; color: var(--txt-faint); margin-top: 6px; }
+    .kbd { background: var(--bg-3); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+    .divider { height: 1px; background: var(--line); margin: 14px 0; }
+    .switch-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+    .file-drop { border: 1.5px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center;
+      color: var(--txt-dim); font-size: 14px; }
+    .file-drop.drag { border-color: var(--brand); background: rgba(99,102,241,.08); }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <img src="icons/logo.svg" alt="">
+    <h1>Recall</h1>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="installBtn" title="Install app">⬇️ Install</button>
+    <button class="icon-btn" id="syncBtn" title="Sync Blackbaud assignments">🔄</button>
+  </header>
+
+  <main>
+    <!-- CALENDAR -->
+    <section class="view active" id="view-calendar">
+      <div class="cal-head">
+        <button class="nav-btn" id="prevMonth" aria-label="Previous month">‹</button>
+        <h2 id="calTitle">Month</h2>
+        <span class="spacer"></span>
+        <button class="btn secondary sm" id="todayBtn">Today</button>
+        <button class="nav-btn" id="nextMonth" aria-label="Next month">›</button>
+      </div>
+      <div class="weekdays">
+        <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+      </div>
+      <div class="grid" id="calGrid"></div>
+      <p class="hint" id="calLegend"></p>
+    </section>
+
+    <!-- AGENDA -->
+    <section class="view" id="view-agenda">
+      <div id="agendaBody"></div>
+    </section>
+
+    <!-- TOPICS -->
+    <section class="view" id="view-topics">
+      <div class="btn-row" style="margin-bottom:6px">
+        <button class="btn sm" id="addTopicBtn2">+ Log a topic</button>
+        <button class="btn secondary sm" id="exportAllIcs">⬇️ All reviews (.ics)</button>
+      </div>
+      <p class="hint">Import the .ics into Google Calendar once and every review reminder lands on your phone.</p>
+      <div id="topicsBody"></div>
+    </section>
+
+    <!-- CLASSES -->
+    <section class="view" id="view-classes">
+      <div class="btn-row" style="margin-bottom:10px">
+        <button class="btn sm" id="addClassBtn">+ Add class</button>
+      </div>
+      <div id="classesBody"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings">
+      <div class="section-title">Review schedule</div>
+      <div class="card">
+        <p class="faint" style="margin-top:0">Days after you learn something to schedule each review. Default is the classic 1·3·7·14·30.</p>
+        <input id="intervalsInput" placeholder="1, 3, 7, 14, 30">
+        <label class="fld">Reminder time of day</label>
+        <input id="reminderTime" type="time" value="18:00">
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn sm" id="saveSchedule">Save schedule</button>
+        </div>
+        <p class="hint">Changing the schedule only affects topics you log afterwards.</p>
+      </div>
+
+      <div class="section-title">Phone notifications</div>
+      <div class="card">
+        <p class="faint" style="margin-top:0">The reliable way to get review reminders on your phone is Google Calendar — export your reviews (Topics tab → “All reviews (.ics)”) and import once. Google then notifies you natively, even with this app closed.</p>
+        <div class="divider"></div>
+        <div class="switch-row">
+          <div><b>In-app notifications</b><div class="faint">Bonus: notify while this app/PWA is open.</div></div>
+          <button class="btn secondary sm" id="enableNotif">Enable</button>
+        </div>
+        <button class="btn ghost sm" id="testNotif" style="margin-top:8px">Send test notification</button>
+      </div>
+
+      <div class="section-title">Blackbaud assignments</div>
+      <div class="card">
+        <label class="fld">Calendar feed URL (webcal/https)</label>
+        <input id="bbUrl" placeholder="webcal://yourschool.myschoolapp.com/...">
+        <p class="hint">In myschoolapp: Calendar → <b>Individual Filter Feeds</b> → copy your assignments feed link. Auto-sync routes it through a public proxy (see README for privacy notes).</p>
+        <label class="fld">CORS proxy</label>
+        <select id="bbProxy">
+          <option value="https://api.allorigins.win/raw?url=">allorigins.win (default)</option>
+          <option value="https://corsproxy.io/?url=">corsproxy.io</option>
+          <option value="">None (direct — only works if your school allows CORS)</option>
+        </select>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn sm" id="bbSync">🔄 Sync now</button>
+          <button class="btn secondary sm" id="bbImportBtn">📁 Import .ics file</button>
+          <button class="btn danger sm" id="bbClear">Clear assignments</button>
+        </div>
+        <input type="file" id="bbFile" accept=".ics,text/calendar" style="display:none">
+        <div class="file-drop" id="bbDrop" style="margin-top:12px">Drag a Blackbaud <b>.ics</b> file here (100% private — no proxy)</div>
+        <p class="hint" id="bbStatus"></p>
+      </div>
+
+      <div class="section-title">Your data</div>
+      <div class="card">
+        <p class="faint" style="margin-top:0">Everything lives in this browser only. Back it up or move it to another device here.</p>
+        <div class="btn-row">
+          <button class="btn secondary sm" id="backupBtn">⬇️ Export backup</button>
+          <button class="btn secondary sm" id="restoreBtn">⬆️ Import backup</button>
+          <button class="btn danger sm" id="wipeBtn">Erase everything</button>
+        </div>
+        <input type="file" id="restoreFile" accept="application/json,.json" style="display:none">
+      </div>
+
+      <div class="card" style="text-align:center">
+        <img src="icons/logo.svg" style="width:42px;height:42px;border-radius:10px" alt="">
+        <p class="faint" style="margin:8px 0 0">Recall · spaced-repetition study calendar<br>Runs entirely in your browser. No account, no servers.</p>
+      </div>
+    </section>
+  </main>
+
+  <button class="fab" id="fab" title="Log what you learned">+</button>
+
+  <nav class="tabs">
+    <button data-view="calendar" class="active"><span class="ic">📅</span>Calendar</button>
+    <button data-view="agenda"><span class="ic">✅</span>To review</button>
+    <button data-view="topics"><span class="ic">📚</span>Topics</button>
+    <button data-view="classes"><span class="ic">🎓</span>Classes</button>
+    <button data-view="settings"><span class="ic">⚙️</span>Settings</button>
+  </nav>
+
+  <!-- Modal host -->
+  <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="ics.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
