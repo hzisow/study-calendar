@@ -1,6 +1,6 @@
 /* Recall service worker — offline app shell + notification handling.
  * Bump CACHE when you change cached files so clients pick up the update. */
-const CACHE = 'recall-v1';
+const CACHE = 'recall-v2';
 const ASSETS = [
   './',
   './index.html',

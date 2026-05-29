@@ -43,6 +43,36 @@ The files in this folder are deploy-ready: a `CNAME` file is already set to
 Visit **https://study.henryzisow.com** on your phone → browser menu →
 **Add to Home Screen** to install it as an app.
 
+## Google Calendar direct sync (optional but recommended)
+
+Lets reviews appear in your Google Calendar the second you log a topic — no
+download or import. Setup is a one-time 5-minute thing in Google Cloud:
+
+1. Open **https://console.cloud.google.com** → top bar **▾ → New Project** →
+   name it `Recall` → **Create**.
+2. Top search bar: **Google Calendar API** → click it → **Enable**.
+3. Left sidebar → **APIs & Services → OAuth consent screen**:
+   - User type: **External** → Create
+   - App name: `Recall` · User support email: your email · Developer email: your email · Save
+   - **Scopes** step: leave empty → Save and continue
+   - **Test users** step: **+ Add Users** → add your own Google email → Save and continue
+4. Left sidebar → **Credentials → + Create Credentials → OAuth client ID**:
+   - Application type: **Web application**
+   - Name: `Recall Web`
+   - **Authorized JavaScript origins → + Add URI** → `https://study.henryzisow.com`
+     - (Also add `http://localhost:8000` if you want to test locally.)
+   - **Create** → copy the **Client ID** (ends in `.apps.googleusercontent.com`).
+5. In the app on your phone/laptop: **Settings → Google Calendar (direct sync)** →
+   paste the Client ID → tap **🔗 Connect Google Calendar** → sign in.
+   - You'll see *“Google hasn't verified this app”* — that's normal for a personal app
+     in Testing mode. Click **Advanced → Continue to Recall**.
+6. Done. A new **Recall Reviews** calendar appears in your Google Calendar
+   (calendar.google.com), and every topic you log creates 5 events on it with
+   built-in phone reminders.
+
+You can switch the Recall calendar's color, hide it during exams, etc. — it's a
+normal Google calendar your Recall app fully owns.
+
 ## Notes
 - **Order matters:** add the GoDaddy DNS record *before* (or right when) you set the
   Pages custom domain — the HTTPS certificate can't be issued until `study`

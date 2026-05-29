@@ -13,10 +13,14 @@ lives in this device's local storage.
   **1 day · 3 days · 1 week · 2 weeks · 1 month** after you learned it. (Editable in Settings.)
 - **Google-Calendar-style month view** with color-coded review chips per class.
 - **"To review" agenda** — overdue / today / next 14 days, with one tap to mark a review done.
-- **Reminders on your phone, the reliable way:** export your reviews as a `.ics`
-  file (or one-click "＋Google Cal" links) and import once into Google Calendar.
-  Google then sends the notifications natively — even with this app closed.
-- **Blackbaud assignments** appear on the same calendar (amber chips).
+- **Direct Google Calendar sync** (recommended): connect your Google account once
+  and reviews go straight into a dedicated **Recall Reviews** calendar — no
+  download or import. Phone reminders are built in. See `DEPLOY.md` for the
+  5-min Google Cloud OAuth setup.
+- **Fallback:** export reviews as `.ics` (or one-click "＋Google Cal" links) if
+  you'd rather not connect.
+- **Blackbaud assignments** appear on the same calendar (amber chips), with
+  optional **live auto-sync** (on app open + every 30 min while open).
 - **In-app notifications** (bonus) while the installed app is open.
 
 ## Getting phone reminders (Google Calendar)

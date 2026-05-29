@@ -206,6 +206,16 @@
     .file-drop { border: 1.5px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center;
       color: var(--txt-dim); font-size: 14px; }
     .file-drop.drag { border-color: var(--brand); background: rgba(99,102,241,.08); }
+    .toggle { position: relative; display: inline-block; width: 42px; height: 24px; flex: 0 0 auto; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider { position: absolute; cursor: pointer; inset: 0; background: var(--bg-3);
+      border: 1px solid var(--line); border-radius: 999px; transition: .15s; }
+    .toggle .slider::before { content: ""; position: absolute; height: 18px; width: 18px;
+      left: 2px; top: 2px; background: var(--txt-dim); border-radius: 50%; transition: .15s; }
+    .toggle input:checked + .slider { background: var(--brand); border-color: var(--brand); }
+    .toggle input:checked + .slider::before { transform: translateX(18px); background: #fff; }
+    .gpill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      background: rgba(34,197,94,.15); color: var(--ok); border: 1px solid rgba(34,197,94,.4); }
   </style>
 </head>
 <body>
@@ -271,9 +281,23 @@
         <p class="hint">Changing the schedule only affects topics you log afterwards.</p>
       </div>
 
-      <div class="section-title">Phone notifications</div>
+      <div class="section-title">Google Calendar (direct sync)</div>
       <div class="card">
-        <p class="faint" style="margin-top:0">The reliable way to get review reminders on your phone is Google Calendar — export your reviews (Topics tab → “All reviews (.ics)”) and import once. Google then notifies you natively, even with this app closed.</p>
+        <p class="faint" style="margin-top:0">Push reviews straight into a dedicated <b>Recall Reviews</b> calendar in your Google account. No download, no import — events appear automatically the second you log a topic, with phone reminders built in.</p>
+        <label class="fld">Google OAuth Client ID</label>
+        <input id="gClientId" placeholder="123…-abc.apps.googleusercontent.com" autocomplete="off">
+        <p class="hint">One-time setup at <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a> — see DEPLOY.md (“Google Calendar direct sync”) for the 5-minute walkthrough.</p>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn sm" id="gConnect">🔗 Connect Google Calendar</button>
+          <button class="btn secondary sm" id="gResync" style="display:none">🔄 Resync everything</button>
+          <button class="btn danger sm" id="gDisconnect" style="display:none">Disconnect</button>
+        </div>
+        <p class="hint" id="gStatus"></p>
+      </div>
+
+      <div class="section-title">Manual / fallback reminders</div>
+      <div class="card">
+        <p class="faint" style="margin-top:0">If you'd rather not connect direct sync, export your reviews as a <b>.ics</b> file (Topics tab → “All reviews (.ics)”) and import once into Google Calendar.</p>
         <div class="divider"></div>
         <div class="switch-row">
           <div><b>In-app notifications</b><div class="faint">Bonus: notify while this app/PWA is open.</div></div>
@@ -286,13 +310,17 @@
       <div class="card">
         <label class="fld">Calendar feed URL (webcal/https)</label>
         <input id="bbUrl" placeholder="webcal://yourschool.myschoolapp.com/...">
-        <p class="hint">In myschoolapp: Calendar → <b>Individual Filter Feeds</b> → copy your assignments feed link. Auto-sync routes it through a public proxy (see README for privacy notes).</p>
+        <p class="hint">In myschoolapp: Calendar → <b>Individual Filter Feeds</b> → copy your assignments feed link.</p>
         <label class="fld">CORS proxy</label>
         <select id="bbProxy">
           <option value="https://api.allorigins.win/raw?url=">allorigins.win (default)</option>
           <option value="https://corsproxy.io/?url=">corsproxy.io</option>
           <option value="">None (direct — only works if your school allows CORS)</option>
         </select>
+        <div class="switch-row" style="margin-top:12px">
+          <div><b>Auto-sync</b><div class="faint">Refresh on open and every 30 min while open.</div></div>
+          <label class="toggle"><input type="checkbox" id="bbAutoSync"><span class="slider"></span></label>
+        </div>
         <div class="btn-row" style="margin-top:12px">
           <button class="btn sm" id="bbSync">🔄 Sync now</button>
           <button class="btn secondary sm" id="bbImportBtn">📁 Import .ics file</button>
@@ -335,6 +363,7 @@
   <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
   <div class="toast" id="toast"></div>
 
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="ics.js"></script>
   <script src="app.js"></script>
 </body>

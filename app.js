@@ -17,7 +17,11 @@
       bbUrl: '',
       bbProxy: 'https://api.allorigins.win/raw?url=',
       bbLastSync: '',
+      bbAutoSync: false,
       lastNotified: '',
+      gClientId: '',
+      gCalendarId: '',
+      gConnected: false,
     },
   };
 
@@ -99,6 +103,7 @@
     };
     state.topics.push(t);
     save();
+    gcalSyncTopic(t).catch(() => {});
     return t;
   }
   function updateTopic(id, patch) {
@@ -108,8 +113,13 @@
     Object.assign(t, patch);
     if (dateChanged) t.reviews = genReviews(t.learnedDate, t.reviews.map((r) => r.offset), t.reviews);
     save();
+    gcalSyncTopic(t).catch(() => {});
   }
-  function deleteTopic(id) { state.topics = state.topics.filter((t) => t.id !== id); save(); }
+  function deleteTopic(id) {
+    const t = state.topics.find((x) => x.id === id);
+    if (t) gcalDeleteTopic(t).catch(() => {});
+    state.topics = state.topics.filter((x) => x.id !== id); save();
+  }
 
   // -------------------------------------------------------- event gathering
   function reviewEvents() {
@@ -265,6 +275,7 @@
     if (!r) return;
     r.done = !r.done; r.doneAt = r.done ? new Date().toISOString() : null;
     save();
+    gcalUpsertReview(t, r).catch(() => {});
     toast(r.done ? `Review ${n} done ✓` : `Review ${n} reopened`);
     render();
   }
@@ -345,10 +356,21 @@
     $('#reminderTime').value = state.settings.reminderTime;
     $('#bbUrl').value = state.settings.bbUrl;
     $('#bbProxy').value = state.settings.bbProxy;
+    $('#bbAutoSync').checked = !!state.settings.bbAutoSync;
     const n = state.assignments.length;
     $('#bbStatus').textContent = n
       ? `${n} assignment${n === 1 ? '' : 's'} loaded${state.settings.bbLastSync ? ' · last sync ' + new Date(state.settings.bbLastSync).toLocaleString() : ''}.`
       : 'No assignments loaded yet.';
+
+    // Google Calendar section
+    $('#gClientId').value = state.settings.gClientId || '';
+    const connected = !!state.settings.gConnected;
+    $('#gConnect').textContent = connected ? '🔗 Reconnect' : '🔗 Connect Google Calendar';
+    $('#gResync').style.display = connected ? '' : 'none';
+    $('#gDisconnect').style.display = connected ? '' : 'none';
+    $('#gStatus').innerHTML = connected
+      ? `<span class="gpill">✓ Connected</span> Syncing to your “Recall Reviews” calendar.`
+      : 'Not connected — log a topic to schedule reviews; export .ics for now.';
   }
 
   function emptyState(big, title, sub) {
@@ -527,33 +549,227 @@
   }
 
   // --------------------------------------------------------- Blackbaud sync
-  async function syncBlackbaud() {
-    const url = state.settings.bbUrl.trim();
-    if (!url) { toast('Add your feed URL in Settings'); switchView('settings'); return; }
+  async function syncBlackbaud(opts) {
+    opts = opts || {};
+    const url = (state.settings.bbUrl || '').trim();
+    if (!url) {
+      if (opts.silent) return;
+      toast('Add your feed URL in Settings'); switchView('settings'); return;
+    }
     const httpUrl = url.replace(/^webcal:\/\//i, 'https://');
     const proxy = state.settings.bbProxy;
     const fetchUrl = proxy ? proxy + encodeURIComponent(httpUrl) : httpUrl;
-    toast('Syncing assignments…');
+    if (!opts.silent) toast('Syncing assignments…');
     try {
       const res = await fetch(fetchUrl, { headers: { 'Accept': 'text/calendar, text/plain, */*' } });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const text = await res.text();
-      ingestIcsText(text);
+      ingestIcsText(text, opts);
     } catch (e) {
       console.error(e);
-      toast('Sync failed — try a different proxy or import the .ics file');
+      if (!opts.silent) toast('Sync failed — try a different proxy or import the .ics file');
     }
   }
-  function ingestIcsText(text) {
+  function ingestIcsText(text, opts) {
+    opts = opts || {};
     const parsed = ICS.parse(text);
-    if (!parsed.length) { toast('No events found in that calendar'); return; }
+    if (!parsed.length) {
+      if (!opts.silent) toast('No events found in that calendar');
+      return;
+    }
     state.assignments = parsed.map((e) => ({
       id: e.uid || uid(), title: e.title, date: e.date, time: e.time || null, source: 'blackbaud',
     }));
     state.settings.bbLastSync = new Date().toISOString();
     save();
-    toast(`Loaded ${state.assignments.length} assignments`);
+    if (!opts.silent) toast(`Loaded ${state.assignments.length} assignments`);
     render();
+  }
+  // Live auto-sync: on app open, on tab visible, every 30 min, throttled to 15 min.
+  function startAutoSync() {
+    if (startAutoSync._timer) { clearInterval(startAutoSync._timer); startAutoSync._timer = null; }
+    if (!state.settings.bbAutoSync || !state.settings.bbUrl) return;
+    maybeBbSync();
+    startAutoSync._timer = setInterval(maybeBbSync, 30 * 60 * 1000);
+  }
+  function maybeBbSync() {
+    if (!state.settings.bbAutoSync || !state.settings.bbUrl) return;
+    const last = state.settings.bbLastSync ? new Date(state.settings.bbLastSync).getTime() : 0;
+    if (Date.now() - last > 15 * 60 * 1000) syncBlackbaud({ silent: true });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) maybeBbSync();
+  });
+
+  // -------------------------------------------------------- Google Calendar
+  // Uses Google Identity Services for OAuth (loaded from gsi/client in index.html)
+  // and the Calendar v3 REST API. Scope 'calendar.app.created' lets us create
+  // and manage a dedicated 'Recall Reviews' calendar without touching anything
+  // else in the user's Google account.
+  const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
+  let tokenClient = null;
+  let gToken = null;
+  let gTokenExpires = 0;
+
+  function gisReady() {
+    return typeof google !== 'undefined' && google.accounts && google.accounts.oauth2;
+  }
+  function waitForGIS(timeoutMs) {
+    const deadline = Date.now() + (timeoutMs || 8000);
+    return new Promise((resolve, reject) => {
+      const tick = () => {
+        if (gisReady()) return resolve();
+        if (Date.now() > deadline) return reject(new Error('Google sign-in script did not load'));
+        setTimeout(tick, 100);
+      };
+      tick();
+    });
+  }
+  function initTokenClient() {
+    const id = (state.settings.gClientId || '').trim();
+    if (!id) throw new Error('Missing Google Client ID');
+    if (tokenClient && tokenClient._cid === id) return tokenClient;
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: id, scope: GCAL_SCOPE, callback: () => {},
+    });
+    tokenClient._cid = id;
+    return tokenClient;
+  }
+  async function getToken(opts) {
+    opts = opts || {};
+    if (gToken && Date.now() < gTokenExpires - 60_000) return gToken;
+    await waitForGIS();
+    const client = initTokenClient();
+    return new Promise((resolve, reject) => {
+      client.callback = (resp) => {
+        if (resp.error || !resp.access_token) return reject(new Error(resp.error || 'No token'));
+        gToken = resp.access_token;
+        gTokenExpires = Date.now() + (resp.expires_in || 3600) * 1000;
+        resolve(gToken);
+      };
+      try { client.requestAccessToken({ prompt: opts.interactive ? 'consent' : '' }); }
+      catch (e) { reject(e); }
+    });
+  }
+  async function gFetch(url, init) {
+    init = init || {};
+    const token = await getToken();
+    const headers = Object.assign({
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+    }, init.headers || {});
+    let res = await fetch(url, Object.assign({}, init, { headers }));
+    if (res.status === 401) {
+      gToken = null;
+      const t2 = await getToken({ interactive: true });
+      headers.Authorization = 'Bearer ' + t2;
+      res = await fetch(url, Object.assign({}, init, { headers }));
+    }
+    return res;
+  }
+  async function ensureRecallCalendar() {
+    if (state.settings.gCalendarId) return state.settings.gCalendarId;
+    const res = await gFetch('https://www.googleapis.com/calendar/v3/calendars', {
+      method: 'POST',
+      body: JSON.stringify({
+        summary: 'Recall Reviews',
+        description: 'Spaced-repetition reviews managed by Recall.',
+        timeZone: ICS.TZ,
+      }),
+    });
+    if (!res.ok) throw new Error('Calendar create failed: ' + res.status);
+    const data = await res.json();
+    state.settings.gCalendarId = data.id; save();
+    return data.id;
+  }
+  // Google event ID rules: 5-1024 chars, lowercase [a-v0-9]. Encode each source
+  // character as two lowercase hex digits — always within a-p, always valid.
+  function gcalEventId(topicId, n) {
+    const src = `r${topicId}r${n}`;
+    let out = '';
+    for (let i = 0; i < src.length; i++) {
+      const c = src.charCodeAt(i);
+      out += (c & 0xf).toString(16) + ((c >> 4) & 0xf).toString(16);
+    }
+    return out;
+  }
+  function gcalEventBody(t, r) {
+    const [hh, mm] = (state.settings.reminderTime || '18:00').split(':').map(Number);
+    const [y, m, d] = r.date.split('-').map(Number);
+    const startDt = new Date(y, m - 1, d, hh, mm, 0);
+    const endDt = new Date(startDt.getTime() + 30 * 60_000);
+    const summary = (r.done ? '✓ ' : '') + `Review ${r.n}/${t.reviews.length}: ${t.title}`;
+    const desc = `Spaced-repetition review · ${classNameOf(t.classId)}` +
+      (t.notes ? `\n\n${t.notes}` : '') + `\n\n— Recall`;
+    return {
+      id: gcalEventId(t.id, r.n),
+      summary, description: desc,
+      start: { dateTime: startDt.toISOString(), timeZone: ICS.TZ },
+      end: { dateTime: endDt.toISOString(), timeZone: ICS.TZ },
+      reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 0 }] },
+    };
+  }
+  async function gcalUpsertReview(t, r) {
+    if (!state.settings.gConnected) return;
+    try {
+      const calId = await ensureRecallCalendar();
+      const body = gcalEventBody(t, r);
+      const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`;
+      let res = await gFetch(base, { method: 'POST', body: JSON.stringify(body) });
+      if (res.status === 409) {
+        // Already exists — update in place.
+        res = await gFetch(`${base}/${body.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      }
+      if (!res.ok && res.status !== 410) {
+        const txt = await res.text();
+        console.warn('gcal upsert', res.status, txt);
+      }
+    } catch (e) { console.warn('gcal upsert err', e); }
+  }
+  async function gcalDeleteReview(topicId, n) {
+    if (!state.settings.gConnected || !state.settings.gCalendarId) return;
+    try {
+      const id = gcalEventId(topicId, n);
+      await gFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(state.settings.gCalendarId)}/events/${id}`, { method: 'DELETE' });
+    } catch (e) { console.warn('gcal delete err', e); }
+  }
+  async function gcalSyncTopic(t) {
+    if (!state.settings.gConnected) return;
+    for (const r of t.reviews) await gcalUpsertReview(t, r);
+  }
+  async function gcalDeleteTopic(t) {
+    if (!state.settings.gConnected) return;
+    for (const r of t.reviews) await gcalDeleteReview(t.id, r.n);
+  }
+  async function connectGoogleCalendar() {
+    const id = ($('#gClientId') && $('#gClientId').value || state.settings.gClientId || '').trim();
+    if (!id) { toast('Paste your Google Client ID first'); return; }
+    state.settings.gClientId = id; save();
+    try {
+      await getToken({ interactive: true });
+      await ensureRecallCalendar();
+      state.settings.gConnected = true; save();
+      renderSettings();
+      toast('Connected ✓ syncing your topics…');
+      let n = 0;
+      for (const t of state.topics) { await gcalSyncTopic(t); n++; }
+      toast(`Pushed ${n} topic${n === 1 ? '' : 's'} to Google Calendar ✓`);
+    } catch (e) {
+      console.error(e);
+      toast('Connect failed — check the Client ID and authorized origin');
+    }
+  }
+  async function resyncAllToGoogle() {
+    if (!state.settings.gConnected) return;
+    toast('Resyncing…');
+    for (const t of state.topics) await gcalSyncTopic(t);
+    toast('Resync done ✓');
+  }
+  function disconnectGoogle() {
+    gToken = null; gTokenExpires = 0;
+    state.settings.gConnected = false; save();
+    renderSettings();
+    toast('Disconnected (Google Calendar events kept)');
   }
 
   // --------------------------------------------------------- notifications
@@ -670,6 +886,18 @@
       state.settings.bbProxy = $('#bbProxy').value;
       save(); syncBlackbaud();
     };
+    $('#bbAutoSync').onchange = (e) => {
+      state.settings.bbUrl = $('#bbUrl').value.trim();
+      state.settings.bbProxy = $('#bbProxy').value;
+      state.settings.bbAutoSync = e.target.checked;
+      save(); startAutoSync();
+      toast(e.target.checked ? 'Auto-sync on ✓' : 'Auto-sync off');
+    };
+
+    // Google Calendar direct sync
+    $('#gConnect').onclick = connectGoogleCalendar;
+    $('#gResync').onclick = resyncAllToGoogle;
+    $('#gDisconnect').onclick = disconnectGoogle;
     $('#bbImportBtn').onclick = () => $('#bbFile').click();
     $('#bbFile').onchange = (e) => { const f = e.target.files[0]; if (f) f.text().then(ingestIcsText); };
     $('#bbClear').onclick = () => { state.assignments = []; save(); render(); toast('Assignments cleared'); };
@@ -696,4 +924,5 @@
   wire();
   switchView('calendar');
   if (Notification && Notification.permission === 'granted') scheduleTodayReminder();
+  startAutoSync();
 })();
